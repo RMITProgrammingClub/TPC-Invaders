@@ -1,1 +1,4 @@
 .venv
+.vscode/settings.json
+space_invaders/.vscode/settings.json
+*.pyc
