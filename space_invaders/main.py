@@ -3,11 +3,11 @@ import pygame
 import time
 
 from keymap import Keymap
-from scoreboard import Scoreboard
+from scoreboard import Scoreboard, TextRow
 from shared import HEIGHT, WIDTH
 
 
-SCALE = 1.5
+SCALE = 1
 SCALE_WIDTH, SCALE_HEIGHT = WIDTH * SCALE, HEIGHT * SCALE
 FPS = 60
 
@@ -144,7 +144,9 @@ class Alien(pygame.sprite.Sprite):
 class Bullet(pygame.sprite.Sprite):
     def __init__(self, x, y):
         pygame.sprite.Sprite.__init__(self)
-        self.image = pygame.image.load("sprites/Player_beam (16 x 16).png")
+        self.image = pygame.image.load(
+            "sprites/Player_beam (16 x 16).png"
+        ).convert_alpha()
         self.image = pygame.transform.scale(self.image, (32, 32))
         self.rect = self.image.get_rect()
         self.rect.center = [x, y]
@@ -158,6 +160,7 @@ class Bullet(pygame.sprite.Sprite):
         if pygame.sprite.spritecollide(self, alien_group, True):
             self.kill()
             print("HIT")
+            pygame.event.post(pygame.event.Event(pygame.USEREVENT, {"add_score": 1}))
 
 
 class Alien_Bullet(pygame.sprite.Sprite):
@@ -170,7 +173,9 @@ class Alien_Bullet(pygame.sprite.Sprite):
         self.speed = 500
 
     def load_sprite(self):
-        sprite_sheet = pygame.image.load("sprites/Enemy_projectile (16 x 16).png")
+        sprite_sheet = pygame.image.load(
+            "sprites/Enemy_projectile (16 x 16).png"
+        ).convert_alpha()
         self.image = sprite_sheet
 
     def update(self, dt, time_now):
@@ -241,6 +246,7 @@ class App:
         self.running = True
         self._display_surf = None
         self.size = self.weight, self.height = SCALE_WIDTH, SCALE_HEIGHT
+        self.score = 0
 
     def on_init(self):
         # Pygame Surface initialisation
@@ -258,6 +264,10 @@ class App:
         self.player_group = player_group
         self.player_group.add(self.spaceship)
 
+        self.score = 0
+        self.score_text = TextRow("SCORE: 0", x=20, y=20, size=20)
+        self.player_group.add(self.score_text)
+
         self.bullet_group = bullet_group
         self.alien_group = alien_group
         self.alien_bullet_group = alien_bullet_group
@@ -271,8 +281,17 @@ class App:
     def on_event(self, event):
         if event.type == pygame.QUIT:
             self._running = False
+        elif event.type == pygame.USEREVENT:
+            if hasattr(event, "on_reset"):
+                self.on_reset()
+            elif hasattr(event, "add_score"):
+                self.score += event.add_score
+                self.score_text.text = "SCORE: " + str(self.score)
+                self.score_text.update()
+            elif hasattr(event, "high_scores_text"):
+                self.scoreboard.load(self.player_group)
         elif GAME_OVER:
-            self.scoreboard.push_event(event)
+            self.scoreboard.accept_event(event)
 
     def on_loop(self):
         global GAME_OVER
@@ -286,8 +305,6 @@ class App:
         self.level.on_loop(time_now)
         if not GAME_OVER:
             self.spaceship.update(self.dt, time_now)
-        # elif keymap.shoot():
-        #     self.on_reset()
 
         self.bullet_group.update(self.dt, time_now)
         self.alien_group.update(self.dt, time_now)
@@ -324,6 +341,7 @@ class App:
         GAME_OVER = True
         pygame.key.set_repeat(400, 100)
         self.alien_group.empty()
+        self.scoreboard.new_score(self.score)
         self.scoreboard.load(self.player_group)
 
     def on_cleanup(self):
