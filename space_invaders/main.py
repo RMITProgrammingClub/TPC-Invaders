@@ -3,8 +3,10 @@ import pygame
 import time
 
 from keymap import Keymap
+from scoreboard import Scoreboard
+from shared import HEIGHT, WIDTH
 
-WIDTH, HEIGHT = 480, 640
+
 SCALE = 1.5
 SCALE_WIDTH, SCALE_HEIGHT = WIDTH * SCALE, HEIGHT * SCALE
 FPS = 60
@@ -15,6 +17,7 @@ GAME_OVER = False
 
 # Sprite Collision Groups
 bullet_group = pygame.sprite.Group()
+alien_bullet_group = pygame.sprite.Group()
 alien_group = pygame.sprite.Group()
 player_group = pygame.sprite.Group()
 
@@ -29,13 +32,14 @@ keymap = Keymap(
 
 # create spaceship class
 class Spaceship(pygame.sprite.Sprite):
-    def __init__(self, x, y, health):
+    def __init__(self, x, y, health, go_cb):
         pygame.sprite.Sprite.__init__(self)
         self.load_sprites()
         self.image = self.player_sprite_n
         self.rect = self.image.get_rect()
         self.rect.center = [x, y]
         self.last_shot = pygame.time.get_ticks()
+        self.go_cb = go_cb
 
         # Shooting Sound
         self.shoot_sound = pygame.mixer.Sound("sounds/laser_shot.wav")
@@ -86,6 +90,13 @@ class Spaceship(pygame.sprite.Sprite):
         # Move the ship
         self.rect.x += dx * speed * dt
 
+        col = pygame.sprite.spritecollide(self, alien_bullet_group, True)
+        if len(col) > 0:
+            for bullet in col:
+                bullet.kill()
+            self.kill()
+            self.go_cb()
+
 
 class Alien(pygame.sprite.Sprite):
     def __init__(self, x, y, dir=1, speed=5):
@@ -122,7 +133,9 @@ class Alien(pygame.sprite.Sprite):
                 self.image_index = 0
             # print("SPRITE CAHNGE")
             if not GAME_OVER and random.random() < 0.025:
-                bullet_group.add(Alien_Bullet(self.rect.centerx, self.rect.bottom))
+                alien_bullet_group.add(
+                    Alien_Bullet(self.rect.centerx, self.rect.bottom)
+                )
                 self.sound.play()
             self.image = self.sprites[self.image_index]
             self.timer = time_now
@@ -165,14 +178,10 @@ class Alien_Bullet(pygame.sprite.Sprite):
 
         if self.rect.y >= HEIGHT:
             self.kill()
-        if pygame.sprite.spritecollide(self, player_group, True):
-            self.kill()
-            global GAME_OVER
-            GAME_OVER = True
 
 
 class Level:
-    def __init__(self):
+    def __init__(self, game_over_cb):
         self.background = pygame.image.load(
             "sprites/Space_BG (2 frames) (64 x 64).png"
         ).convert_alpha()
@@ -181,6 +190,7 @@ class Level:
         self.background_a = self.create_surface(background_a, background_b)
         self.background_b = self.create_surface(background_b, background_a)
         self.timer = 0
+        self.game_over_cb = game_over_cb
 
     def create_aliens(self, rows, cols, alien_group):
         for row in range(rows):
@@ -238,29 +248,35 @@ class App:
         self._display_surf = pygame.display.set_mode(self.size, pygame.HWSURFACE)
         self._running = True
 
-        self.level = Level()
+        self.level = Level(self.on_game_over)
 
         # Initialise groups
-        self.spaceship = Spaceship(int(WIDTH / 2), HEIGHT - 100, 3)
+        self.spaceship = Spaceship(int(WIDTH / 2), HEIGHT - 100, 3, self.on_game_over)
 
+        self.scoreboard = Scoreboard()
 
         self.player_group = player_group
         self.player_group.add(self.spaceship)
 
         self.bullet_group = bullet_group
         self.alien_group = alien_group
+        self.alien_bullet_group = alien_bullet_group
 
         self.alien_group = self.level.create_aliens(6, 6, self.alien_group)
+
+        # get rid of auto repeating keys
+        pygame.key.set_repeat()
 
     # Handle events
     def on_event(self, event):
         if event.type == pygame.QUIT:
             self._running = False
+        elif GAME_OVER:
+            self.scoreboard.push_event(event)
 
     def on_loop(self):
         global GAME_OVER
         self.clock.tick(FPS)
-        print(self.clock.get_fps())
         self.now = time.time()
         self.dt = self.now - self.prev_time
         self.prev_time = self.now
@@ -270,9 +286,12 @@ class App:
         self.level.on_loop(time_now)
         if not GAME_OVER:
             self.spaceship.update(self.dt, time_now)
+        # elif keymap.shoot():
+        #     self.on_reset()
 
         self.bullet_group.update(self.dt, time_now)
         self.alien_group.update(self.dt, time_now)
+        self.alien_bullet_group.update(self.dt, time_now)
 
         if len(alien_group) == 0:
             GAME_OVER = True
@@ -282,9 +301,10 @@ class App:
         temp_buffer = pygame.Surface((WIDTH, HEIGHT))
         temp_buffer.blit(*self.level.get_surface())
 
+        self.alien_group.draw(temp_buffer)
         self.player_group.draw(temp_buffer)
         self.bullet_group.draw(temp_buffer)
-        self.alien_group.draw(temp_buffer)
+        self.alien_bullet_group.draw(temp_buffer)
         temp_buffer = pygame.transform.scale(temp_buffer, (SCALE_WIDTH, SCALE_HEIGHT))
         self._display_surf.blit(temp_buffer, (0, 0))
         # update display
@@ -292,11 +312,19 @@ class App:
 
     def on_reset(self):
         self.bullet_group.empty()
+        self.alien_bullet_group.empty()
         self.player_group.empty()
         self.alien_group.empty()
         global GAME_OVER
         GAME_OVER = False
         self.on_init()
+
+    def on_game_over(self):
+        global GAME_OVER
+        GAME_OVER = True
+        pygame.key.set_repeat(400, 100)
+        self.alien_group.empty()
+        self.scoreboard.load(self.player_group)
 
     def on_cleanup(self):
         pygame.quit()
